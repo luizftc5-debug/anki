@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-14",
+  "about": "Regras editoriais e de qualidade derivadas do CLAUDE.md. As referências abaixo ensinam estrutura e estilo. Nunca são fonte de conteúdo médico.",
+  "absolute_rule": "Nenhum conhecimento médico entra num cartão sem estar nas fontes autorizadas para a geração atual.",
+  "export_gates": {
+    "about": "Aplicadas por scripts/export_apkg.py. Uma falha em cartão aprovado cancela a exportação inteira.",
+    "required_metadata": [
+      "card_id",
+      "card_type",
+      "source_file",
+      "source_version",
+      "topic",
+      "priority",
+      "validation_status",
+      "source_page ou source_section"
+    ],
+    "only_status_exported": "approved",
+    "other_statuses": [
+      "needs_review",
+      "rejected",
+      "INSUFFICIENT_SOURCE_EVIDENCE"
+    ],
+    "evidence_excerpt_must_exist_in_source_page": true,
+    "numbers_in_card_must_exist_in_source_page": true,
+    "visual_evidence_requires_evidence_image": true,
+    "no_identical_fronts": true,
+    "no_scheduling_or_review_history": true
+  },
+  "card_standard": {
+    "relevance": "contribui para compreender, reconhecer, interpretar, diferenciar, diagnosticar, graduar gravidade ou conduzir, conforme o documento",
+    "atomicity": "uma unidade de conhecimento por cartão; exceção: listas que formam uma unidade clínica, como componentes de um escore",
+    "active_recall": "a frente não pode conter nem sugerir a resposta",
+    "clarity": "pergunta delimitada; quando pedir lista, dizer quantos itens",
+    "independence": "o cartão funciona isolado, sem depender de outro",
+    "conciseness": "tão curto quanto possível sem perder condições, exceções, unidades, valores de corte, relações causais e critérios de diferenciação",
+    "precision": "nunca simplificar a ponto de tornar a afirmação incorreta",
+    "discrimination": "priorizar diferenças entre conceitos semelhantes quando a fonte as traz",
+    "cognitive_economy": "não transformar detalhes acessórios em muitos cartões"
+  },
+  "priority_scale": {
+    "muito_alta": [
+      "condutas e decisões clínicas",
+      "critérios diagnósticos",
+      "diagnóstico diferencial",
+      "emergências e gravidade"
+    ],
+    "alta": [
+      "valores, escores e classificações",
+      "manifestações clínicas características",
+      "interpretação de exames",
+      "fisiopatologia decisiva",
+      "definições fundamentais"
+    ],
+    "baixa": [
+      "detalhes acessórios"
+    ],
+    "note": "heurística editorial estimada só com o documento atual; não é estatística de prova"
+  },
+  "forbidden": [
+    "mnemônicos ausentes da fonte",
+    "vinhetas com idade, sexo, sinais vitais, exames ou evolução que a fonte não traz",
+    "imagens que entregam a resposta",
+    "o mesmo conhecimento repetido em vários formatos para aumentar a contagem",
+    "emojis, decoração tipográfica, textos motivacionais, destaques excessivos",
+    "metas artificiais de quantidade"
+  ],
+  "style_references": {
+    "estrategia_med": {
+      "from": "Referência A do CLAUDE.md (Bradiarritmias)",
+      "traits": [
+        "progressão de conceitos para condutas",
+        "perguntas curtas e diretas",
+        "resposta única ou conjunto clinicamente indivisível",
+        "imagem de exame como centro da pergunta",
+        "achado morfológico separado da interpretação",
+        "condutas divididas por situação clínica",
+        "algoritmos fragmentados por ponto de decisão, preservando a condição de cada conduta"
+      ]
+    },
+    "eu_medico_residente": {
+      "from": "Referência B do CLAUDE.md (Pneumonia e Derrame Pleural)",
+      "traits": [
+        "listas com quantidade delimitada",
+        "lacunas em termos ou valores relevantes",
+        "verdadeiro ou falso com correção fundamentada no verso",
+        "critérios com números, unidades e operadores preservados",
+        "escores: cartão geral, cartões de critérios importantes ou de aplicação, sem triplicar o mesmo conteúdo"
+      ]
+    },
+    "neurologia_apkg": {
+      "from": "Referência C do CLAUDE.md (Fraqueza Muscular)",
+      "traits": [
+        "frente com contexto anatômico ou clínico explícito",
+        "alvo de recuperação explícito",
+        "topografia e função em cartões separados",
+        "imagem complementar no verso, sem substituir a resposta textual",
+        "observação curta entre parênteses quando necessária",
+        "organização por subtemas"
+      ]
+    },
+    "medicina_decoreba": {
+      "from": "Referência D do CLAUDE.md (organização do Anki)",
+      "traits": [
+        "disciplina, tema e subtema",
+        "etiquetas para estudo seletivo",
+        "sem alterar configurações de revisão do usuário",
+        "sem histórico de aprendizagem artificial",
+        "agendamento por conta do Anki"
+      ]
+    }
+  },
+  "quality_passes": [
+    "curadoria médica",
+    "engenharia pedagógica",
+    "auditoria factual",
+    "revisão editorial",
+    "validação técnica"
+  ]
+}

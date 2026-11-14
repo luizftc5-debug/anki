@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-14",
+  "about": "Preferências pedagógicas do usuário. Não armazena fatos médicos. Antes de alterar, acrescente o objeto atual como uma linha em feedback/preferences_history.jsonl.",
+  "generation_profile": {
+    "value": "EQUILIBRADO",
+    "origin": "padrão do CLAUDE.md, seção 05"
+  },
+  "conciseness": {
+    "value": null,
+    "origin": "ainda não informado pelo usuário"
+  },
+  "card_type_preference": {
+    "value": null,
+    "origin": "ainda não informado pelo usuário"
+  },
+  "image_usage": {
+    "value": null,
+    "origin": "ainda não informado pelo usuário"
+  },
+  "clinical_depth": {
+    "value": null,
+    "origin": "ainda não informado pelo usuário"
+  },
+  "style_reference": {
+    "value": null,
+    "origin": "ainda não informado pelo usuário"
+  },
+  "formatting": {
+    "value": "negrito seletivo no elemento essencial; listas em <ul>/<ol>; complemento no campo Extra; fonte no campo Source",
+    "origin": "padrão do CLAUDE.md, seções 06 e 14"
+  },
+  "organization": {
+    "value": "baralho Medicina::Disciplina::Tema; tags para classificações transversais",
+    "origin": "padrão do CLAUDE.md, seção 10"
+  },
+  "recurring_rejection_criteria": [],
+  "learned_rules": []
+}

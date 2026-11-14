@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Este repositório é público. Material do usuário e tudo que deriva dele ficam fora do git:
+# documentos originais, texto extraído, imagens, cartões e baralhos exportados.
+/sources/*
+/projects/*
+/media/*
+/cards/*
+/exports/*
+!/sources/.gitkeep
+!/projects/.gitkeep
+!/media/.gitkeep
+!/cards/.gitkeep
+!/exports/.gitkeep

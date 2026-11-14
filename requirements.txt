@@ -1,0 +1,7 @@
+# Biblioteca oficial do Anki (mesmo backend do Anki Desktop). Verificado com esta versão.
+anki==26.9.4
+pymupdf==2.1
+pillow
+python-docx
+python-pptx
+pytest
