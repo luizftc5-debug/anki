@@ -5,6 +5,7 @@ Uso:
   python scripts/extract_source.py <arquivo> --project <slug>
   python scripts/extract_source.py <arquivo.pdf> --project <slug> --render-pages [--pages 3-10] [--dpi 150]
   python scripts/extract_source.py <arquivo.pdf> --project <slug> --clip PAGINA,x0,y0,x1,y1 [--dpi 200]
+      (x0..y1 em frações da página, de 0 a 1, lidas na página renderizada)
 
 Formatos: PDF, DOCX, PPTX, TXT, Markdown, EPUB (via pandoc), imagens e APKG.
 
@@ -14,8 +15,11 @@ Saídas (o arquivo original nunca é alterado):
   projects/<slug>/pages/             páginas renderizadas, para leitura visual (--render-pages)
   sources/registry.json              registro das fontes autorizadas
 
-Não há OCR neste ambiente. Páginas com pouco texto extraível entram em `low_text_units`
-e precisam ser lidas visualmente a partir das páginas renderizadas.
+Não há OCR neste ambiente. Páginas com pouco texto extraível entram em `low_text_units` e
+são lidas visualmente nas páginas renderizadas. A transcrição vai para o `text` da unidade, com
+`"origin": "visual_transcription"`; ela é preservada quando o mesmo arquivo é extraído de novo.
+Imagens idênticas em várias páginas (logotipos, fundos) são salvas uma vez e marcadas com
+`repeated_on_pages`.
 """
 from __future__ import annotations
 
@@ -56,11 +60,23 @@ def split_by_headings(text: str) -> list[dict]:
     return units
 
 
+def open_pdf(path: Path):
+    import pymupdf
+
+    try:
+        doc = pymupdf.open(path)
+    except Exception as exc:  # noqa: BLE001
+        sys.exit(f"ERRO: não foi possível abrir o PDF: {exc}")
+    if doc.needs_pass:
+        sys.exit("ERRO: o PDF está protegido por senha")
+    return doc
+
+
 def extract_pdf(path: Path, media: Path, rel) -> list[dict]:
     import pymupdf
 
-    units, saved = [], {}
-    with pymupdf.open(path) as doc:
+    units, saved, by_content, seen_on = [], {}, {}, {}
+    with open_pdf(path) as doc:
         for number, page in enumerate(doc, 1):
             images = []
             for k, info in enumerate(page.get_images(full=True), 1):
@@ -68,6 +84,13 @@ def extract_pdf(path: Path, media: Path, rel) -> list[dict]:
                 if xref not in saved:
                     data = doc.extract_image(xref)
                     if min(data["width"], data["height"]) < MIN_SIDE:
+                        continue
+                    digest = hashlib.sha1(data["image"]).hexdigest()
+                    if digest in by_content:  # mesma imagem com outro xref
+                        saved[xref] = by_content[digest]
+                        rects = page.get_image_rects(xref)
+                        images.append({**saved[xref], "bbox_pt": [round(v, 1) for v in rects[0]] if rects else None})
+                        seen_on.setdefault(saved[xref]["file"], set()).add(number)
                         continue
                     if data["ext"] in WEB_IMAGES and not info[1]:  # info[1] = máscara de transparência
                         target = media / f"p{number:04d}_img{k:02d}.{data['ext']}"
@@ -83,10 +106,15 @@ def extract_pdf(path: Path, media: Path, rel) -> list[dict]:
                                 pass  # máscara incompatível: mantém a imagem sem transparência
                         target = media / f"p{number:04d}_img{k:02d}.png"
                         pix.save(target)
-                    saved[xref] = {"file": rel(target), "width": data["width"], "height": data["height"]}
+                    saved[xref] = by_content[digest] = {"file": rel(target), "width": data["width"], "height": data["height"]}
                 rects = page.get_image_rects(xref)
                 images.append({**saved[xref], "bbox_pt": [round(v, 1) for v in rects[0]] if rects else None})
+                seen_on.setdefault(saved[xref]["file"], set()).add(number)
             units.append(unit(number, None, page.get_text("text"), images))
+    for u in units:
+        for image in u["images"]:
+            if len(seen_on[image["file"]]) > 1:
+                image["repeated_on_pages"] = len(seen_on[image["file"]])
     return units
 
 
@@ -95,7 +123,7 @@ def render_pdf(path: Path, out: Path, pages: list[int] | None, dpi: int) -> list
 
     out.mkdir(parents=True, exist_ok=True)
     written = []
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         for number in pages or range(1, doc.page_count + 1):
             target = out / f"p{number:04d}.png"
             doc[number - 1].get_pixmap(dpi=dpi).save(target)
@@ -104,13 +132,19 @@ def render_pdf(path: Path, out: Path, pages: list[int] | None, dpi: int) -> list
 
 
 def clip_pdf(path: Path, media: Path, spec: str, dpi: int) -> Path:
-    """Recorta uma região da página (coordenadas em pontos do PDF). Serve para figuras vetoriais."""
+    """Recorta uma região da página, em frações (0 a 1) da largura e da altura. Serve para figuras vetoriais."""
     import pymupdf
 
-    number, x0, y0, x1, y1 = (float(v) for v in spec.split(","))
-    with pymupdf.open(path) as doc:
-        target = media / f"p{int(number):04d}_clip_{int(x0)}_{int(y0)}_{int(x1)}_{int(y1)}.png"
-        doc[int(number) - 1].get_pixmap(dpi=dpi, clip=pymupdf.Rect(x0, y0, x1, y1)).save(target)
+    number, x0, y0, x1, y1 = spec.split(",")
+    number, box = int(number), [float(v) for v in (x0, y0, x1, y1)]
+    if not (0 <= box[0] < box[2] <= 1 and 0 <= box[1] < box[3] <= 1):
+        sys.exit("ERRO: --clip usa frações da página: 0 <= x0 < x1 <= 1 e 0 <= y0 < y1 <= 1")
+    with open_pdf(path) as doc:
+        r = doc[number - 1].rect
+        clip = pymupdf.Rect(r.x0 + box[0] * r.width, r.y0 + box[1] * r.height,
+                            r.x0 + box[2] * r.width, r.y0 + box[3] * r.height)
+        target = media / f"p{number:04d}_clip_{'_'.join(f'{v:.3f}'[2:] for v in box)}.png"
+        doc[number - 1].get_pixmap(dpi=dpi, clip=clip).save(target)
     return target
 
 
@@ -265,13 +299,19 @@ def main() -> None:
 
     version = "sha256:" + hashlib.sha256(src.read_bytes()).hexdigest()
     source_name = rel(src) if src.is_relative_to(root) else str(src)
+    out = project / "source_text.json"
+    if out.exists():  # preserva transcrições visuais já feitas para este mesmo arquivo
+        previous = json.loads(out.read_text("utf-8"))
+        if previous.get("source_version") == version and len(previous["units"]) == len(units):
+            for i, old in enumerate(previous["units"]):
+                if old.get("origin") == "visual_transcription":
+                    units[i] = {**old, "chars": len(old["text"].strip())}
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     low = [u["page"] or u["section"] or i for i, u in enumerate(units, 1) if u["chars"] < LOW_TEXT]
     dump = {
         "source_file": source_name, "source_version": version, "kind": ext, "extracted_at": now,
         "units": units, "low_text_units": low,
     }
-    out = project / "source_text.json"
     out.write_text(json.dumps(dump, ensure_ascii=False, indent=1) + "\n", "utf-8")
 
     registry_path = root / "sources" / "registry.json"

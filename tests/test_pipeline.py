@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-from export_apkg import ExportError, export  # noqa: E402
+from export_apkg import ExportError, check, export  # noqa: E402
 from verify_apkg import verify  # noqa: E402
 
 VERSION = "sha256:" + "0" * 64
@@ -62,7 +62,7 @@ def project(tmp_path: Path) -> tuple[Path, dict]:
         "cards": [
             {**meta("e-001", 1, "O parâmetro alfa do ensaio vale 42 unidades."), "card_type": "basic",
              "front": "Qual é o valor do parâmetro alfa do ensaio?", "back": "<b>42 unidades</b>",
-             "extra": "Observação técnica.", "tags": ["Teste::Sub", "Definição"]},
+             "extra": "Parâmetro do ensaio.", "tags": ["Teste::Sub", "Definição"]},
             {**meta("e-002", 1, "A sequência de calibração tem etapa inicial e etapa final."), "card_type": "cloze",
              "text": "A sequência de calibração tem etapa {{c1::inicial}} e etapa {{c2::final}}.", "tags": ["Teste::Sub"]},
             {**meta("e-003", 2, "Quando o limite beta é superior a 7,5 mV, a rotina é interrompida."),
@@ -122,10 +122,10 @@ def test_exporta_e_reimporta_todos_os_tipos(project, modern):
     try:
         basic = col.get_note(col.find_notes('"Front:Qual é o valor*"')[0])
         assert basic["Front"] == "Qual é o valor do parâmetro alfa do ensaio?"
-        assert basic["Back"] == "<b>42 unidades</b>" and basic["Extra"] == "Observação técnica."
+        assert basic["Back"] == "<b>42 unidades</b>" and basic["Extra"] == "Parâmetro do ensaio."
         assert basic["Source"] == "ensaio.pdf, p. 1 — Seção de teste"
         answer = basic.cards()[0].answer()
-        assert "42 unidades" in answer and "Observação técnica." in answer and "ensaio.pdf" in answer
+        assert "42 unidades" in answer and "Parâmetro do ensaio." in answer and "ensaio.pdf" in answer
         assert sorted(os.listdir(col.media.dir())) == ["esquema.png", "figura.png"]
 
         # Image Occlusion nativo: o próprio Anki reconhece o modelo e interpreta as máscaras
@@ -160,7 +160,7 @@ def test_reexportar_atualiza_sem_duplicar(project, modern):
         time.sleep(1.1)  # o Anki só atualiza notas com data de modificação mais recente
 
         v2 = copy.deepcopy(deck)
-        v2["cards"][0]["back"] = "<b>42 unidades</b> (corrigido)"
+        v2["cards"][0]["back"] = "<b>42 unidades</b> (parâmetro alfa)"
         v2["cards"].append({**meta("e-008", 2, "a rotina é interrompida"), "card_type": "basic",
                             "front": "Cartão novo da segunda versão?", "back": "Sim."})
         run(root, v2, modern=modern)
@@ -170,7 +170,7 @@ def test_reexportar_atualiza_sem_duplicar(project, modern):
         assert len(log.new) == 1 and len(log.updated) == 1  # só o cartão corrigido é sobrescrito
         assert user.note_count() == 7
         assert len(user.models.all_names_and_ids()) == notetypes
-        assert user.get_note(user.find_notes('"Front:Qual é o valor*"')[0])["Back"].endswith("(corrigido)")
+        assert user.get_note(user.find_notes('"Front:Qual é o valor*"')[0])["Back"].endswith("(parâmetro alfa)")
 
         # edição feita dentro do Anki num cartão que não mudou aqui: a v3 não pode apagá-la
         time.sleep(1.1)
@@ -182,7 +182,7 @@ def test_reexportar_atualiza_sem_duplicar(project, modern):
         user.models.update_dict(css)
         time.sleep(1.1)
         v3 = copy.deepcopy(v2)
-        v3["cards"][1]["extra"] = "Complemento novo."
+        v3["cards"][1]["extra"] = "Calibração do ensaio."
         run(root, v3, modern=modern)
         log = user.import_anki_package(ImportAnkiPackageRequest(package_path=str(root / "exports/ensaio.apkg"))).log
         assert len(log.conflicting) == 0 and len(log.new) == 0 and len(log.updated) == 1
@@ -196,8 +196,15 @@ def test_reexportar_atualiza_sem_duplicar(project, modern):
 @pytest.mark.parametrize("change, message", [
     (lambda c: c[0].update(evidence_excerpt="O parâmetro gama do ensaio vale 42 unidades."), "evidence_excerpt não encontrado"),
     (lambda c: c[0].update(source_page=2), "evidence_excerpt não encontrado"),
-    (lambda c: c[0].update(back="<b>43 unidades</b>"), "sem respaldo na página da fonte: 43"),
-    (lambda c: c[2].update(front="O limite beta está acima de 7.5 mV e abaixo de 9 mV?"), "sem respaldo na página da fonte: 9"),
+    (lambda c: c[0].update(back="<b>43 unidades</b>"), "sem respaldo no trecho de evidência: 43"),
+    (lambda c: c[2].update(front="O limite beta está acima de 7.5 mV e abaixo de 9 mV?"), "sem respaldo no trecho de evidência: 9"),
+    (lambda c: c[0].update(back="42 unidades; 7,5 mV"), "sem respaldo no trecho de evidência: 7.5"),
+    (lambda c: c[0].update(back="42 miligramas"), "ausentes das fontes autorizadas: miligramas"),
+    (lambda c: c[1].update(text="A sequência de calibração tem etapa {{c1::preliminar}} e etapa final."), "ausentes das fontes autorizadas: preliminar"),
+    (lambda c: c[2].update(back="É suspensa."), "ausentes das fontes autorizadas: suspensa"),
+    (lambda c: c[0].update(source_page=2, evidence_excerpt="O parâmetro alfa do ensaio vale 42 unidades."), "(está em 1)"),
+    (lambda c: c[1].update(text="{{c1::A sequência}} {{c2::de calibração}}."), "não deixa contexto"),
+    (lambda c: c[0].update(back=c[0]["front"]), "frente e verso iguais"),
     (lambda c: c[0].pop("topic"), "metadado ausente: topic"),
     (lambda c: c[0].update(evidence_excerpt=""), "evidence_excerpt ausente"),
     (lambda c: c[0].update(source_file="sources/outro.pdf"), "não está entre as fontes autorizadas"),
@@ -243,27 +250,38 @@ def test_extrai_pdf_com_paginas_imagens_e_recorte(tmp_path):
     Image.new("RGB", (300, 200), "navy").save(figure)
     pdf = tmp_path / "fonte.pdf"
     doc = pymupdf.open()
-    page = doc.new_page()
+    page = doc.new_page(width=600, height=800)
     page.insert_text((72, 72), "Primeira pagina do documento de teste: valor 42 unidades.")
     page.insert_image(pymupdf.Rect(72, 100, 372, 300), filename=str(figure))
-    doc.new_page().insert_text((72, 72), "Segunda pagina do documento de teste: limite 7,5 mV.")
+    second = doc.new_page(width=600, height=800)
+    second.insert_text((72, 72), "Segunda pagina do documento de teste: limite 7,5 mV.")
+    second.insert_image(pymupdf.Rect(72, 400, 372, 600), filename=str(figure))  # mesma figura: deduplicada
     doc.new_page()
     doc.save(pdf)
     doc.close()
 
     out = json.loads(extract(tmp_path, str(pdf)))
     dump = json.loads((tmp_path / out["source_text"]).read_text("utf-8"))
-    assert out["units"] == 3 and out["images"] == 1 and out["low_text_units"] == [3]
+    assert out["units"] == 3 and out["images"] == 2 and out["low_text_units"] == [3]
     assert dump["source_version"].startswith("sha256:") and len(dump["source_version"]) == 71
     assert "42 unidades" in dump["units"][0]["text"] and "7,5 mV" in dump["units"][1]["text"]
     image = dump["units"][0]["images"][0]
     assert (image["width"], image["height"]) == (300, 200) and (tmp_path / image["file"]).is_file()
+    assert dump["units"][1]["images"][0]["file"] == image["file"] and image["repeated_on_pages"] == 2
+    assert len(list((tmp_path / "media/ext").iterdir())) == 1
+
+    # transcrição visual da página sem texto é preservada ao extrair de novo
+    dump["units"][2].update(text="Transcricao visual da terceira pagina do documento.", origin="visual_transcription")
+    (tmp_path / out["source_text"]).write_text(json.dumps(dump), "utf-8")
+    again = json.loads(extract(tmp_path, str(pdf)))
+    kept = json.loads((tmp_path / out["source_text"]).read_text("utf-8"))["units"][2]
+    assert kept["origin"] == "visual_transcription" and again["low_text_units"] == []
     registry = json.loads((tmp_path / "sources/registry.json").read_text("utf-8"))
     assert registry[0]["source_version"] == dump["source_version"] and registry[0]["project"] == "ext"
 
     extract(tmp_path, str(pdf), "--render-pages", "--pages", "1-2")
     assert sorted(p.name for p in (tmp_path / "projects/ext/pages").iterdir()) == ["p0001.png", "p0002.png"]
-    clip = extract(tmp_path, str(pdf), "--clip", "1,72,100,372,300", "--dpi", "144").strip()
+    clip = extract(tmp_path, str(pdf), "--clip", "1,0.12,0.125,0.62,0.375", "--dpi", "144").strip()
     assert Image.open(tmp_path / clip).size == (600, 400)
 
 
@@ -313,3 +331,64 @@ def test_mascaras_agrupadas_viram_um_cartao(project):
         assert parsed == {1: 2, 2: 1} and len(note.cards()) == 2
     finally:
         col.close()
+
+
+def test_avisos_nao_bloqueiam_e_aparecem_no_manifesto(project):
+    root, deck = project
+    deck["cards"][0]["back"] = "<b>42 unidades</b> (ver rotina do ensaio, PDF)"
+    deck["cards"][2]["front"] = "Paciente idoso: o limite beta é superior a 7,5 mV. O que acontece com a rotina?"
+    deck["cards"].append({**meta("e-009", 1, "A sequência de calibração tem etapa inicial e etapa final."),
+                          "card_type": "basic", "front": "Quais são as 2 etapas da sequência de calibração?",
+                          "back": "<ul><li>Inicial</li><li>Final</li></ul>"})
+    deck["cards"].append({**meta("e-010", 1, "A sequência de calibração tem etapa inicial e etapa final."),
+                          "card_type": "basic", "front": "Etapas da sequência de calibração?",
+                          "back": "<ol><li>Inicial</li><li>Final</li></ol>"})
+    deck["cards"].append({**meta("e-011", 2, ["Quando o limite beta é superior a 7,5 mV", "a rotina é interrompida"]),
+                          "card_type": "basic", "front": "Limite beta superior a 7,5 mV: a rotina continua. V ou F?",
+                          "back": "<b>Falso.</b> A rotina é interrompida."})
+    manifest = run(root, deck)
+    warnings = manifest["warnings"]
+    assert any("fora da página citada: rotina" in w for w in warnings["e-001"])
+    assert any("sigla(s) que a fonte não usa: PDF" in w for w in warnings["e-001"])
+    assert any("termo(s) da vinheta ausentes das fontes: paciente, idoso" in w for w in warnings["e-003"])
+    assert "e-009" not in warnings  # "2" na frente é a contagem dos itens do verso
+    assert any("lista de 2 itens sem a quantidade na frente" in w for w in warnings["e-010"])
+    # V ou F: "Falso" no verso é aceito; a afirmação falsa da frente gera só aviso
+    assert warnings["e-011"] == ["termo(s) da pergunta ausentes das fontes: continua"]
+    assert manifest["notes"] == 9
+
+
+def test_transcricao_visual_gera_aviso(project):
+    root, deck = project
+    source = root / "projects/ensaio/source_text.json"
+    data = json.loads(source.read_text("utf-8"))
+    data["units"][1]["origin"] = "visual_transcription"
+    source.write_text(json.dumps(data), "utf-8")
+    assert any("transcrição visual" in w for w in run(root, deck)["warnings"]["e-003"])
+
+
+def test_check_confere_sem_exportar_e_desenha_mascaras(project):
+    root, deck = project
+    deck["cards"][6]["back"] = "Sim, 99 unidades."
+    path = root / "cards/ensaio.json"
+    path.write_text(json.dumps(deck, ensure_ascii=False), "utf-8")
+    report = check(path, root=root)
+    assert report["checked"] == 7 and list(report["errors"]) == ["e-007"]  # em revisão também é conferido
+    assert "99" in report["errors"]["e-007"][0]
+    assert report["mask_previews"] == ["projects/ensaio/masks/e-004.png", "projects/ensaio/masks/e-005.png"]
+    overlay = Image.open(root / "projects/ensaio/masks/e-004.png").convert("RGB")
+    assert overlay.size == (800, 500) and overlay.getpixel((180, 160))[0] > overlay.getpixel((180, 160))[1] + 40
+    assert not (root / "exports").exists()
+
+
+def test_pdf_com_senha_e_recusado(tmp_path):
+    import pymupdf
+
+    pdf = tmp_path / "senha.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Documento protegido de teste.")
+    doc.save(pdf, encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="y")
+    doc.close()
+    cmd = [sys.executable, str(SCRIPTS / "extract_source.py"), str(pdf), "--project", "ext", "--root", str(tmp_path)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    assert result.returncode != 0 and "protegido por senha" in result.stderr

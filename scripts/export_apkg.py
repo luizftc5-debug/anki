@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """Exporta os cartões aprovados de cards/<projeto>.json para um .apkg real.
 
-Uso: python scripts/export_apkg.py cards/<projeto>.json [--out exports/<projeto>.apkg] [--modern]
+Uso:
+  python scripts/export_apkg.py cards/<projeto>.json --check    confere, sem exportar
+  python scripts/export_apkg.py cards/<projeto>.json [--out exports/<projeto>.apkg] [--modern]
 
 Usa a biblioteca oficial `anki` (o mesmo backend do Anki Desktop): modelos próprios para
 Basic e Cloze e o modelo nativo de Image Occlusion (Anki 23.10+), com máscaras editáveis.
 
-Travas antes de exportar. Qualquer falha num cartão aprovado cancela a exportação inteira:
-  - metadados de rastreabilidade completos (seção 08 do CLAUDE.md);
-  - o trecho de evidência precisa existir no texto extraído da fonte, na página indicada;
-  - todo número visível no cartão precisa existir nessa mesma página da fonte;
-  - mídia referenciada presente; lacunas Cloze válidas; máscaras dentro da imagem;
-  - nenhuma frente repetida.
+Erros (qualquer um, em cartão aprovado, cancela a exportação inteira):
+  - metadados de rastreabilidade incompletos (seção 08 do CLAUDE.md); fonte não autorizada;
+  - trecho de evidência que não existe literalmente na página citada;
+  - número visível no cartão que não está nos trechos de evidência;
+  - termo da resposta (verso, extra, frase do cloze) que não existe nas fontes autorizadas;
+  - estrutura inválida: campo vazio, lacuna, máscara, mídia, card_id ou frente repetidos.
+Avisos (relatados ao usuário, não bloqueiam): termo fora da página citada, termo da pergunta
+ou da vinheta ausente das fontes, sigla que a fonte não usa, verso com mais de 25 palavras,
+lista sem a quantidade na frente, mais de 3 lacunas, evidência de transcrição visual.
 Cartões com validation_status diferente de "approved" não são exportados.
 
-Estas travas são mecânicas. Elas não substituem a auditoria semântica (o trecho sustenta
-mesmo a resposta?), que é feita na elaboração dos cartões.
+As travas são lexicais. Provam que o cartão não cita o que a fonte não diz; não provam que a
+frase foi bem interpretada. Essa parte é a auditoria semântica, feita na elaboração.
 
 Identificadores estáveis: o GUID da nota deriva de projeto + card_id, e os IDs dos modelos,
 campos e templates são fixos. Reimportar um pacote atualizado atualiza as notas existentes
@@ -90,13 +95,44 @@ class ExportError(Exception):
     pass
 
 
-# ---------- normalização e travas ----------
+# ---------- normalização ----------
+
+STOP = set("""
+a o as os um uma uns umas de do da dos das em no na nos nas por para com sem sob sobre entre e ou
+mas que se como quando onde qual quais quem seu sua seus suas este esta esse essa isto isso aquele
+aquela ao aos pelo pela pelos pelas mais menos muito pouco ser estar ter haver sao foi era sera
+pode podem deve devem tem cada todo toda todos todas outro outra outros outras tambem ja nao sim
+apenas ainda assim entao pois porque caso desde ate apos antes durante contra segundo conforme
+sendo tendo estao foram seja sejam qualquer mesmo mesma tipo forma
+verdadeiro verdadeira falso falsa correto correta incorreto incorreta ambos ambas nenhum nenhuma
+exceto respectivamente
+""".split())
+QUESTION = set("""
+quanto quantos quantas defina definicao cite descreva indique explique diferencie diferenca
+caracteriza caracteristica caracteristico principal principais complete lacuna significa
+representa indica sugere esperado comum comuns frequente frequentes
+""".split())
+MAX_BACK, MAX_FRONT, MAX_GAPS = 25, 30, 3
+ACRONYM = re.compile(r"\b[A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9]{1,2}\b")
+
 
 def loose(text: str) -> str:
     """Chave de comparação tolerante a quebras de linha, hifenização, caixa e ligaduras."""
-    text = unicodedata.normalize("NFKC", text).replace("\u00ad", "")
+    text = unicodedata.normalize("NFKC", text).replace("­", "")
     text = text.translate(str.maketrans("“”‘’", "\"\"''"))
     return re.sub(r"[\s\-‐‑‒–—]+", "", text).casefold()
+
+
+def fold(text: str) -> str:
+    """Sem acento, em minúsculas e com a hifenização de fim de linha desfeita."""
+    text = unicodedata.normalize("NFKC", text or "").replace("­", "")
+    text = re.sub(r"(\w)[-‐‑]\s*\n\s*(\w)", r"\1\2", text)
+    return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn").casefold()
+
+
+def strip_markup(text: str) -> str:
+    text = re.sub(r"\{\{c\d+::(.*?)(?:::.*?)?\}\}", r"\1", text or "", flags=re.S)
+    return html.unescape(re.sub(r"<[^>]+>", " ", text))
 
 
 def visible(card: dict) -> str:
@@ -105,13 +141,50 @@ def visible(card: dict) -> str:
         "cloze": ("text", "extra"),
         "image_occlusion": ("header", "back_extra"),
     }.get(card["card_type"], ("front", "back", "extra"))
-    raw = " ".join(str(card.get(f) or "") for f in fields)
-    raw = re.sub(r"\{\{c\d+::", "", raw).replace("}}", " ")
-    return html.unescape(re.sub(r"<[^>]+>", " ", raw))
+    return strip_markup(" ".join(str(card.get(f) or "") for f in fields))
+
+
+def answer_of(card: dict) -> str:
+    """O que o cartão afirma: verso e extra; no cloze, a frase inteira."""
+    fields = ("text", "extra") if card["card_type"] == "cloze" else ("back", "extra")
+    return " ".join(str(card.get(f) or "") for f in fields)
 
 
 def numbers(text: str) -> set[str]:
     return {m.group().replace(",", ".") for m in re.finditer(r"\d+(?:[.,]\d+)*", text)}
+
+
+def count_words(text: str) -> int:
+    return len(re.findall(r"[a-z0-9]+", fold(strip_markup(text))))
+
+
+def terms(text: str, skip: set[str] = frozenset()) -> list[str]:
+    """Palavras de conteúdo (4+ letras) e siglas em maiúsculas (2-3 letras) de um campo do cartão."""
+    plain = strip_markup(text)
+    acronyms = {fold(a) for a in ACRONYM.findall(plain)}
+    out = []
+    for word in re.findall(r"[a-z0-9]+", fold(plain)):
+        if word.isdigit() or word in STOP or word in skip or word in out:
+            continue
+        if len(word) >= 4 or word in acronyms:
+            out.append(word)
+    return out
+
+
+class Material:
+    """Vocabulário das fontes. Compara por radical para aceitar flexões (tratar/tratamento)."""
+
+    def __init__(self, texts):
+        self.tokens: set[str] = set()
+        self.prefixes: set[str] = set()
+        for text in texts:
+            for word in re.findall(r"[a-z0-9]+", fold(text)):
+                if word not in self.tokens:
+                    self.tokens.add(word)
+                    self.prefixes.update(word[:n] for n in range(4, len(word) + 1))
+
+    def has(self, word: str) -> bool:
+        return word in self.tokens if len(word) < 4 else word[:max(4, len(word) - 2)] in self.prefixes
 
 
 def pages_of(value) -> list[int]:
@@ -140,29 +213,52 @@ def load_sources(deck: dict, root: Path) -> dict:
     return sources
 
 
-def source_text_for(card: dict, units: list[dict]) -> str:
+def cited_units(card: dict, units: list[dict]) -> list[dict]:
     pages = pages_of(card.get("source_page"))
-    chosen = [u for u in units if u.get("page") in pages] if pages else units
-    return "\n".join(u["text"] for u in chosen)
+    if pages:
+        return [u for u in units if u.get("page") in pages]
+    section = card.get("source_section")
+    return [u for u in units if section and u.get("section") == section] or units
 
 
-def check_card(card: dict, sources: dict, root: Path) -> list[str]:
+# ---------- travas ----------
+
+def check_card(card: dict, sources: dict, material: Material, root: Path) -> tuple[list[str], list[str]]:
+    """Devolve (erros, avisos). Erro cancela a exportação; aviso é relatado ao usuário."""
     errors = [f"metadado ausente: {k}" for k in REQUIRED if card.get(k) in (None, "")]
+    warnings: list[str] = []
     ctype = card.get("card_type")
     if ctype not in CARD_TYPES:
-        return errors + [f"card_type inválido: {ctype}"]
+        return errors + [f"card_type inválido: {ctype}"], warnings
     if not card.get("source_page") and not card.get("source_section"):
         errors.append("metadado ausente: source_page ou source_section")
     if not isinstance(card.get("priority"), (int, float)) or not 0 <= card["priority"] <= 100:
         errors.append("priority deve ser um número de 0 a 100")
 
-    # conteúdo
+    # estrutura e forma
+    items = len(re.findall(r"<li\b", str(card.get("back") or ""), re.I))
     if ctype in ("basic", "clinical_reasoning"):
-        errors += [f"campo vazio: {f}" for f in ("front", "back") if not str(card.get(f) or "").strip()]
+        front, back = str(card.get("front") or ""), str(card.get("back") or "")
+        errors += [f"campo vazio: {f}" for f, v in (("front", front), ("back", back)) if not strip_markup(v).strip()]
+        if fold(strip_markup(front)).strip() == fold(strip_markup(back)).strip():
+            errors.append("frente e verso iguais")
+        if count_words(back) > MAX_BACK:
+            warnings.append(f"verso com {count_words(back)} palavras (limite {MAX_BACK}): fragmentar ou encurtar")
+        if count_words(front) > MAX_FRONT:
+            warnings.append(f"frente com {count_words(front)} palavras (limite {MAX_FRONT})")
+        if items >= 2 and str(items) not in {n.lstrip("0") for n in numbers(strip_markup(front))}:
+            warnings.append(f"lista de {items} itens sem a quantidade na frente")
     elif ctype == "cloze":
-        ords = sorted({int(n) for n in re.findall(r"\{\{c(\d+)::[^}]+\}\}", card.get("text") or "")})
+        gaps = re.findall(r"\{\{c(\d+)::(.*?)(?:::.*?)?\}\}", card.get("text") or "", re.S)
+        ords = sorted({int(n) for n, _ in gaps})
         if not ords or ords != list(range(1, len(ords) + 1)):
             errors.append("cloze sem lacunas válidas numeradas a partir de c1")
+        if any(not strip_markup(g).strip() for _, g in gaps):
+            errors.append("lacuna vazia")
+        if not terms(re.sub(r"\{\{c\d+::.*?\}\}", " ", card.get("text") or "", flags=re.S)):
+            errors.append("a frase não deixa contexto fora das lacunas")
+        if len(ords) > MAX_GAPS:
+            warnings.append(f"{len(ords)} lacunas no mesmo cartão (limite {MAX_GAPS})")
     else:
         errors += check_occlusions(card, root)
     for name in re.findall(r"<img[^>]+src=[\"']([^\"']+)[\"']", " ".join(str(v) for v in card.values())):
@@ -173,25 +269,63 @@ def check_card(card: dict, sources: dict, root: Path) -> list[str]:
     # fidelidade à fonte
     src = sources.get(card.get("source_file"))
     if src is None:
-        return errors + ["source_file não está entre as fontes autorizadas desta geração"]
+        return errors + ["source_file não está entre as fontes autorizadas desta geração"], warnings
     if card.get("source_version") != src["version"]:
         errors.append("source_version não corresponde à fonte autorizada")
     if card.get("evidence_kind") == "visual":
         if not card.get("evidence_image") or not (root / card["evidence_image"]).is_file():
             errors.append("evidência visual sem evidence_image existente")
-    elif src["units"] is None:
-        errors.append("fonte sem texto extraído: use evidence_kind 'visual' com evidence_image")
-    else:
-        text = source_text_for(card, src["units"])
-        excerpt = str(card.get("evidence_excerpt") or "")
-        if len(loose(excerpt)) < 12:
+        return errors, warnings
+    if src["units"] is None:
+        return errors + ["fonte sem texto extraído: use evidence_kind 'visual' com evidence_image"], warnings
+
+    units = cited_units(card, src["units"])
+    page_text = "\n".join(u["text"] for u in units)
+    excerpts = card.get("evidence_excerpt")
+    excerpts = [excerpts] if isinstance(excerpts, str) else list(excerpts or [""])
+    found = []
+    for excerpt in excerpts:
+        key = loose(str(excerpt))
+        if len(key) < 12:
             errors.append("evidence_excerpt ausente ou curto demais")
-        elif loose(excerpt) not in loose(text):
-            errors.append("evidence_excerpt não encontrado na página indicada da fonte")
-        missing = numbers(visible(card)) - numbers(text)
-        if missing:
-            errors.append(f"número(s) sem respaldo na página da fonte: {', '.join(sorted(missing))}")
-    return errors
+        elif key in loose(page_text):
+            found.append(excerpt)
+        else:
+            where = [u.get("page") or u.get("section") for u in src["units"] if key in loose(u["text"])]
+            hint = f" (está em {where[0]})" if where else ""
+            errors.append(f"evidence_excerpt não encontrado na página indicada da fonte{hint}")
+    if any(u.get("origin") == "visual_transcription" for u in units):
+        warnings.append("evidência vem de transcrição visual: conferir no original")
+    if len(found) != len(excerpts):
+        return errors, warnings
+
+    # números: todos precisam estar nos trechos de evidência
+    allowed = numbers(" ".join(found))
+    if items >= 2:
+        allowed |= {str(items), f"{items:02d}"}  # "Quais são as 3 ...?" conta os itens do verso
+    missing = numbers(visible(card)) - allowed
+    if missing:
+        errors.append(f"número(s) sem respaldo no trecho de evidência: {', '.join(sorted(missing))}")
+
+    # termos: o que o cartão afirma precisa existir nas fontes autorizadas
+    answer = terms(answer_of(card))
+    absent = [w for w in answer if not material.has(w)]
+    acronyms = [w for w in absent if len(w) < 4]
+    if len(absent) > len(acronyms):
+        errors.append("termo(s) da resposta ausentes das fontes autorizadas: "
+                      + ", ".join(w for w in absent if len(w) >= 4))
+    if acronyms:
+        warnings.append(f"sigla(s) que a fonte não usa: {', '.join(w.upper() for w in acronyms)}")
+    page = Material([page_text])
+    off_page = [w for w in answer if w not in absent and not page.has(w)]
+    if off_page:
+        warnings.append(f"termo(s) da resposta fora da página citada: {', '.join(off_page)}")
+    if ctype in ("basic", "clinical_reasoning"):
+        unknown = [w for w in terms(card.get("front") or "", QUESTION) if not material.has(w)]
+        if unknown:
+            label = "da vinheta" if ctype == "clinical_reasoning" else "da pergunta"
+            warnings.append(f"termo(s) {label} ausentes das fontes: {', '.join(unknown)}")
+    return errors, warnings
 
 
 def check_occlusions(card: dict, root: Path) -> list[str]:
@@ -358,33 +492,78 @@ def stamp_notes(col: Collection, note_ids: list[int], previous: dict) -> dict:
     return state
 
 
-def export(deck_path: Path, out: Path | None = None, modern: bool = False, root: Path = ROOT) -> dict:
-    deck = json.loads(deck_path.read_text("utf-8"))
+def audit(deck: dict, root: Path, statuses: tuple[str, ...] = ("approved",)) -> tuple[list, list, dict, dict]:
+    """Aplica as travas aos cartões com os status indicados. Devolve (checados, pulados, erros, avisos)."""
     for key in ("project", "deck", "cards"):
         if not deck.get(key):
             raise ExportError(f"arquivo de cartões sem '{key}'")
     sources = load_sources(deck, root)
-    out = out or root / "exports" / f"{deck['project']}.apkg"
-    state_path = deck_path.with_suffix(".export_state.json")
-
-    approved, skipped, failures = [], [], {}
+    material = Material(u["text"] for s in sources.values() for u in (s["units"] or []))
+    checked, skipped, failures, warnings = [], [], {}, {}
     seen_ids, seen_fronts = set(), {}
     for card in deck["cards"]:
         cid = card.get("card_id") or "?"
         if cid in seen_ids:
             failures.setdefault(cid, []).append("card_id repetido")
         seen_ids.add(cid)
-        if card.get("validation_status") != "approved":
+        if card.get("validation_status") not in statuses:
             skipped.append({"card_id": cid, "validation_status": card.get("validation_status")})
             continue
-        errors = check_card(card, sources, root)
+        errors, warns = check_card(card, sources, material, root)
         front = loose(visible(card) if card.get("card_type") == "cloze" else str(card.get("front") or cid))
         if card.get("card_type") != "image_occlusion" and front in seen_fronts:
             errors.append(f"frente idêntica à do cartão {seen_fronts[front]}")
         seen_fronts.setdefault(front, cid)
         if errors:
             failures.setdefault(cid, []).extend(errors)
-        approved.append(card)
+        if warns:
+            warnings[cid] = warns
+        checked.append(card)
+    return checked, skipped, failures, warnings
+
+
+def draw_masks(card: dict, root: Path, out_dir: Path) -> Path:
+    """Desenha as máscaras sobre a imagem, para conferir o posicionamento antes de exportar."""
+    from PIL import ImageDraw
+
+    with Image.open(root / card["image"]) as im:
+        base = im.convert("RGBA")
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    fill, line = (220, 38, 38, 110), (220, 38, 38, 255)
+    for i, occ in enumerate(card["occlusions"], 1):
+        if occ["shape"] == "polygon":
+            points = [tuple(p) for p in occ["points"]]
+            draw.polygon(points, fill=fill, outline=line)
+            anchor = points[0]
+        else:
+            box = (occ["x"], occ["y"], occ["x"] + occ["w"], occ["y"] + occ["h"])
+            (draw.rectangle if occ["shape"] == "rect" else draw.ellipse)(box, fill=fill, outline=line, width=2)
+            anchor = box[:2]
+        draw.text((anchor[0] + 4, anchor[1] + 2), str(occ.get("group", i)), fill=(255, 255, 255, 255))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{card['card_id']}.png"
+    Image.alpha_composite(base, layer).convert("RGB").save(out)
+    return out
+
+
+def check(deck_path: Path, root: Path = ROOT) -> dict:
+    """Confere cartões aprovados e em revisão sem gerar pacote. Desenha as máscaras de oclusão."""
+    deck = json.loads(deck_path.read_text("utf-8"))
+    checked, skipped, failures, warnings = audit(deck, root, ("approved", "needs_review"))
+    masks = [
+        str(draw_masks(c, root, root / "projects" / deck["project"] / "masks").relative_to(root))
+        for c in checked if c.get("card_type") == "image_occlusion" and c["card_id"] not in failures
+    ]
+    return {"checked": len(checked), "with_errors": len(failures), "with_warnings": len(warnings),
+            "errors": failures, "warnings": warnings, "mask_previews": masks, "not_checked": skipped}
+
+
+def export(deck_path: Path, out: Path | None = None, modern: bool = False, root: Path = ROOT) -> dict:
+    deck = json.loads(deck_path.read_text("utf-8"))
+    approved, skipped, failures, warnings = audit(deck, root)
+    out = out or root / "exports" / f"{deck['project']}.apkg"
+    state_path = deck_path.with_suffix(".export_state.json")
     if failures:
         lines = [f"  {cid}: {'; '.join(errs)}" for cid, errs in failures.items()]
         raise ExportError("exportação cancelada; cartões aprovados com falha:\n" + "\n".join(lines))
@@ -436,6 +615,7 @@ def export(deck_path: Path, out: Path | None = None, modern: bool = False, root:
         "scheduled_cards": report["scheduled_cards"],
         "revlog_entries": report["revlog_entries"],
         "evidence_checked_visually": [c["card_id"] for c in approved if c.get("evidence_kind") == "visual"],
+        "warnings": warnings,
         "skipped": skipped,
         "traceability": [
             {**{k: c[k] for k in trace_keys if k in c}, "guid": guid_for(deck["project"], c["card_id"])}
@@ -451,14 +631,19 @@ def main() -> None:
     parser.add_argument("cards", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--modern", action="store_true", help="formato novo do Anki (2.1.50+), arquivo menor")
+    parser.add_argument("--check", action="store_true", help="só confere (aprovados e em revisão), sem exportar")
     args = parser.parse_args()
     try:
+        if args.check:
+            report = check(args.cards)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            sys.exit(1 if report["errors"] else 0)
         manifest = export(args.cards, args.out, args.modern)
     except ExportError as exc:
         sys.exit(f"ERRO: {exc}")
     summary = {k: manifest[k] for k in (
         "apkg", "notes", "cards", "notes_by_type", "decks", "media_files", "image_occlusion",
-        "scheduled_cards", "revlog_entries", "evidence_checked_visually",
+        "scheduled_cards", "revlog_entries", "evidence_checked_visually", "warnings",
     )}
     summary["skipped"] = len(manifest["skipped"])
     print(json.dumps(summary, ensure_ascii=False, indent=2))

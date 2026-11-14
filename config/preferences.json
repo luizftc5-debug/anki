@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "updated_at": "2026-11-14",
-  "about": "Preferências pedagógicas do usuário. Não armazena fatos médicos. Antes de alterar, acrescente o objeto atual como uma linha em feedback/preferences_history.jsonl.",
+  "about": "Preferências pedagógicas do usuário. Não armazena fatos médicos. Antes de alterar, acrescente o objeto atual como uma linha em feedback/preferences_history.jsonl. Cada item de learned_rules: {\"rule\": \"...\", \"date\": \"AAAA-MM-DD\", \"from_correction\": \"correção do usuário que originou a regra\"}.",
   "generation_profile": {
     "value": "EQUILIBRADO",
     "origin": "padrão do CLAUDE.md, seção 05"

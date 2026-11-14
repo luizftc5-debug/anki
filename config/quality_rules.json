@@ -4,7 +4,7 @@
   "about": "Regras editoriais e de qualidade derivadas do CLAUDE.md. As referências abaixo ensinam estrutura e estilo. Nunca são fonte de conteúdo médico.",
   "absolute_rule": "Nenhum conhecimento médico entra num cartão sem estar nas fontes autorizadas para a geração atual.",
   "export_gates": {
-    "about": "Aplicadas por scripts/export_apkg.py. Uma falha em cartão aprovado cancela a exportação inteira.",
+    "about": "Aplicadas por scripts/export_apkg.py. Erro em cartão aprovado cancela a exportação inteira; aviso é relatado ao usuário. --check confere também os cartões em revisão.",
     "required_metadata": [
       "card_id",
       "card_type",
@@ -21,11 +21,23 @@
       "rejected",
       "INSUFFICIENT_SOURCE_EVIDENCE"
     ],
-    "evidence_excerpt_must_exist_in_source_page": true,
-    "numbers_in_card_must_exist_in_source_page": true,
-    "visual_evidence_requires_evidence_image": true,
-    "no_identical_fronts": true,
-    "no_scheduling_or_review_history": true
+    "errors": [
+      "trecho de evidência que não existe literalmente na página citada",
+      "número visível no cartão ausente dos trechos de evidência (exceção: contagem de itens da lista do verso)",
+      "termo da resposta (verso, extra, frase do cloze) ausente das fontes autorizadas",
+      "evidência visual sem evidence_image",
+      "estrutura inválida, frente e verso iguais, card_id ou frente repetidos"
+    ],
+    "warnings": [
+      "termo da resposta fora da página citada",
+      "termo da pergunta ou da vinheta ausente das fontes",
+      "sigla que a fonte não usa",
+      "verso com mais de 25 palavras; frente com mais de 30",
+      "lista sem a quantidade na frente",
+      "mais de 3 lacunas",
+      "evidência vinda de transcrição visual"
+    ],
+    "never": "fazer um cartão passar editando o texto extraído, afrouxando as travas ou exportando por fora delas; corrigir o cartão"
   },
   "card_standard": {
     "relevance": "contribui para compreender, reconhecer, interpretar, diferenciar, diagnosticar, graduar gravidade ou conduzir, conforme o documento",
@@ -116,5 +128,50 @@
     "auditoria factual",
     "revisão editorial",
     "validação técnica"
+  ],
+  "reference_metrics": {
+    "about": "Medidas dos baralhos de referência do usuário (Referências B e C). Orientam a extensão; não são metas.",
+    "neurologia_apkg": {
+      "notas": 143,
+      "palavras_frente_mediana": 6,
+      "palavras_verso_mediana": 9,
+      "palavras_verso_p75": 16,
+      "imagem": "no verso em 79 de 143"
+    },
+    "pneumonia_pdf": {
+      "cartoes": 20,
+      "palavras_frente_mediana": 16,
+      "palavras_verso_mediana": 4.5,
+      "palavras_verso_p75": 10
+    }
+  },
+  "form_rules": {
+    "one_fact": "se a resposta liga duas ideias independentes com 'e', são dois cartões",
+    "front": "tema na primeira linha, pergunta curta na segunda (ex.: 'Mobitz II<br>Local habitual?'); uma única resposta possível; nada de 'fale sobre'",
+    "back": "até 25 palavras, meta de 10 ou menos; negrito só no núcleo; conduta com dose cabe, parágrafo não",
+    "lists": "a frente diz quantos itens; o verso usa <ol> ou <ul>, um item por linha; mais de 5 itens: dividir por critério do próprio material ou virar cloze",
+    "cloze": "até 3 lacunas curtas; a frase sem a lacuna ainda indica o que se pede; nunca esconder palavra trivial",
+    "recurring_forms": [
+      "'Quais são os 3 ...?'",
+      "'V ou F?' com a correção no verso quando falso",
+      "'Diferencie X de Y'",
+      "lacuna com opções entre parênteses '(aumento/redução)'"
+    ],
+    "image": "imagem do próprio documento, no verso ilustrando a resposta; oclusão para anatomia, fluxogramas e exames com rótulos",
+    "source_problems": "se o material parece errado, desatualizado ou contraditório, o cartão segue o material e o problema é relatado ao usuário fora do cartão"
+  },
+  "not_a_card": [
+    "histórico",
+    "epônimos sem uso",
+    "exemplos ilustrativos",
+    "frases de transição",
+    "repetição do que outro cartão já cobra"
+  ],
+  "self_check": [
+    "A resposta inteira está nos trechos citados?",
+    "Quem estudou o material acerta sem ver o verso, e só há uma resposta certa?",
+    "Muda conduta, diagnóstico ou classificação, ou é central no documento?",
+    "Dá para responder em menos de 10 segundos?",
+    "Outro cartão do baralho já cobra isso?"
   ]
 }
