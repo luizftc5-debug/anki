@@ -1,0 +1,4 @@
+{"date": "2026-11-14", "type": "negative", "reason": "imagem inadequada", "detail": "cartões de imagem/anatomia irrelevantes ao tema do documento; só fazer se pedido explicitamente", "action": "image_usage atualizado; regra aprendida adicionada"}
+{"date": "2026-11-14", "type": "scope", "detail": "bases de antibióticos com foco clínico, sem microbiologia densa; apenas betalactâmicos como classe"}
+{"date": "2026-11-14", "type": "clarification", "detail": "imagens permitidas quando fizerem sentido com o conteúdo e a relevância clínica; proibido apenas o uso fora do tema", "action": "image_usage corrigido"}
+{"date": "2026-11-14", "type": "negative", "reason": "pouco relevante; lentidão", "detail": "figura PK/PD irrelevante para memorizar; processo lento", "action": "regras aprendidas adicionadas"}

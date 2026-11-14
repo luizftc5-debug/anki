@@ -15,12 +15,12 @@
     "origin": "ainda não informado pelo usuário"
   },
   "image_usage": {
-    "value": null,
-    "origin": "ainda não informado pelo usuário"
+    "value": "usar imagem ou Image Occlusion apenas quando a figura for relevante ao tema clínico do documento e agregar à recuperação; nunca gerar cartões de anatomia/fisiologia periférica ao tema (ex.: anatomia num PDF de ITU) sem pedido explícito",
+    "origin": "correção do usuário em 2026-11-14 (esclarecimento)"
   },
   "clinical_depth": {
-    "value": null,
-    "origin": "ainda não informado pelo usuário"
+    "value": "foco clínico e de prova; sem microbiologia densa; PK/PD só no que muda posologia",
+    "origin": "pedido do usuário em 2026-11-14"
   },
   "style_reference": {
     "value": null,
@@ -34,6 +34,24 @@
     "value": "baralho Medicina::Disciplina::Tema; tags para classificações transversais",
     "origin": "padrão do CLAUDE.md, seção 10"
   },
-  "recurring_rejection_criteria": [],
-  "learned_rules": []
+  "recurring_rejection_criteria": [
+    "imagem ou oclusão fora do tema clínico do documento"
+  ],
+  "learned_rules": [
+    {
+      "rule": "Cartões de imagem só quando a figura servir ao tema clínico do documento; não criar cartões de anatomia/fisiologia acessória ao tema sem pedido explícito",
+      "date": "2026-11-14",
+      "from_correction": "usuário rejeitou cartões de anatomia gerados de um PDF de ITU e esclareceu que imagens relevantes continuam permitidas"
+    },
+    {
+      "rule": "Antes de criar cartão de figura, perguntar: memorizar esta figura muda conduta ou diagnóstico? Gráficos conceituais (ex.: curva PK/PD) não viram cartão. Na dúvida, não fazer.",
+      "date": "2026-11-14",
+      "from_correction": "usuário rejeitou a ideia de cartão sobre a figura de PK/PD"
+    },
+    {
+      "rule": "Priorizar velocidade: ler só o escopo pedido, extrair texto uma vez, redigir todos os cartões num único lote e exportar; sem inspeções visuais desnecessárias",
+      "date": "2026-11-14",
+      "from_correction": "usuário reclamou da demora na geração"
+    }
+  ]
 }
