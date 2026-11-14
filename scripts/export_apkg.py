@@ -35,6 +35,7 @@ ser aumentado quando os templates ou o CSS mudarem.
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import html
 import json
@@ -113,6 +114,7 @@ caracteriza caracteristica caracteristico principal principais complete lacuna s
 representa indica sugere esperado comum comuns frequente frequentes
 """.split())
 MAX_BACK, MAX_FRONT, MAX_GAPS = 25, 30, 3
+HARD_FRONT = 40  # regra inegociável do usuário: pergunta com até 40 palavras
 ACRONYM = re.compile(r"\b[A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔÃÕÇ0-9]{1,2}\b")
 
 
@@ -244,7 +246,9 @@ def check_card(card: dict, sources: dict, material: Material, root: Path) -> tup
             errors.append("frente e verso iguais")
         if count_words(back) > MAX_BACK:
             warnings.append(f"verso com {count_words(back)} palavras (limite {MAX_BACK}): fragmentar ou encurtar")
-        if count_words(front) > MAX_FRONT:
+        if count_words(front) > HARD_FRONT:
+            errors.append(f"frente com {count_words(front)} palavras (máximo {HARD_FRONT})")
+        elif count_words(front) > MAX_FRONT:
             warnings.append(f"frente com {count_words(front)} palavras (limite {MAX_FRONT})")
         if items >= 2 and str(items) not in {n.lstrip("0") for n in numbers(strip_markup(front))}:
             warnings.append(f"lista de {items} itens sem a quantidade na frente")
@@ -547,6 +551,60 @@ def draw_masks(card: dict, root: Path, out_dir: Path) -> Path:
     return out
 
 
+def plain(text: str) -> str:
+    return re.sub(r"\s+", " ", strip_markup(text)).strip()
+
+
+def front_back(card: dict) -> tuple[str, str]:
+    """Frente e verso como o estudante os lê (cloze: lacunas como [...], respostas no verso)."""
+    ctype = card.get("card_type")
+    if ctype == "cloze":
+        text = card.get("text") or ""
+        gaps = [plain(g) for g in re.findall(r"\{\{c\d+::(.*?)(?:::.*?)?\}\}", text, re.S)]
+        front = plain(re.sub(r"\{\{c\d+::.*?\}\}", "[...]", text, flags=re.S))
+        return front, " | ".join(gaps) + (f" ({plain(card['extra'])})" if card.get("extra") else "")
+    if ctype == "image_occlusion":
+        labels = [o.get("label", "?") for o in card.get("occlusions", [])]
+        return f"[imagem] {card.get('image', '')} {plain(card.get('header') or '')}".strip(), ", ".join(labels)
+    back = plain(card.get("back") or "") + (f" ({plain(card['extra'])})" if card.get("extra") else "")
+    return plain(card.get("front") or ""), back
+
+
+def write_preview(deck: dict, cards: list[dict], failures: dict, warnings: dict, out: Path) -> Path:
+    """Prévia integral para o usuário aprovar, sem imprimir os cartões no chat."""
+    cell = lambda t: str(t).replace("|", "\\|")  # noqa: E731
+    lines = [f"# Prévia: {deck['project']} ({len(cards)} cartões)", "",
+             "| # | Frente | Verso | Tags | Fonte | Status |", "|---|---|---|---|---|---|"]
+    ids = {c["card_id"] for c in cards}
+    for n, c in enumerate(deck["cards"], 1):
+        if c.get("card_id") not in ids:
+            continue
+        front, back = front_back(c)
+        page = f"p. {c['source_page']}" if c.get("source_page") else c.get("source_section", "")
+        flag = "ERRO: " + "; ".join(failures[c["card_id"]]) if c["card_id"] in failures else \
+            ("aviso: " + "; ".join(warnings[c["card_id"]]) if c["card_id"] in warnings else c["validation_status"])
+        lines.append(f"| {n} | {cell(front)} | {cell(back)} | {cell(' '.join(c.get('tags', [])))} | {cell(page)} | {cell(flag)} |")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", "utf-8")
+    return out
+
+
+def write_csv(deck: dict, cards: list[dict], out: Path) -> int:
+    """CSV importável no Anki (Frente;Verso;Tags), só Basic e raciocínio clínico; relido para conferir."""
+    rows = [[guid_for(deck["project"], c["card_id"]), c["front"],
+             c["back"] + (f"<br><small>{c['extra']}</small>" if c.get("extra") else ""),
+             " ".join(re.sub(r"\s+", "_", t.strip()) for t in c.get("tags", []) if t.strip())]
+            for c in cards if c["card_type"] in ("basic", "clinical_reasoning")]
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        fh.write("#separator:Semicolon\n#html:true\n#guid column:1\n#tags column:4\n")
+        csv.writer(fh, delimiter=";").writerows(rows)
+    with out.open(encoding="utf-8", newline="") as fh:
+        back = [r for r in csv.reader(fh, delimiter=";") if r and not r[0].startswith("#")]
+    if back != rows:
+        raise ExportError(f"CSV não confere ao ser relido: {out}")
+    return len(rows)
+
+
 def check(deck_path: Path, root: Path = ROOT) -> dict:
     """Confere cartões aprovados e em revisão sem gerar pacote. Desenha as máscaras de oclusão."""
     deck = json.loads(deck_path.read_text("utf-8"))
@@ -555,8 +613,10 @@ def check(deck_path: Path, root: Path = ROOT) -> dict:
         str(draw_masks(c, root, root / "projects" / deck["project"] / "masks").relative_to(root))
         for c in checked if c.get("card_type") == "image_occlusion" and c["card_id"] not in failures
     ]
+    preview = write_preview(deck, checked, failures, warnings, root / "projects" / deck["project"] / "preview.md")
     return {"checked": len(checked), "with_errors": len(failures), "with_warnings": len(warnings),
-            "errors": failures, "warnings": warnings, "mask_previews": masks, "not_checked": skipped}
+            "errors": failures, "warnings": warnings, "mask_previews": masks, "not_checked": skipped,
+            "preview": str(preview.relative_to(root))}
 
 
 def export(deck_path: Path, out: Path | None = None, modern: bool = False, root: Path = ROOT) -> dict:
@@ -622,6 +682,9 @@ def export(deck_path: Path, out: Path | None = None, modern: bool = False, root:
             for c in approved
         ],
     }
+    csv_path = out.with_suffix(".csv")
+    manifest["csv"] = {"file": str(csv_path.relative_to(root)) if csv_path.is_relative_to(root) else str(csv_path),
+                       "rows": write_csv(deck, approved, csv_path)}
     out.with_suffix(".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", "utf-8")
     return manifest
 
@@ -636,18 +699,20 @@ def main() -> None:
     try:
         if args.check:
             report = check(args.cards)
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            print(f"conferidos {report['checked']}; com erro {report['with_errors']}; com aviso "
+                  f"{report['with_warnings']}; fora da conferência {len(report['not_checked'])}")
+            for kind in ("errors", "warnings"):
+                for cid, msgs in report[kind].items():
+                    print(f"{'ERRO' if kind == 'errors' else 'aviso'} {cid}: {'; '.join(msgs)}")
+            print(f"prévia: {report['preview']}" + (f"; máscaras: {len(report['mask_previews'])}" if report["mask_previews"] else ""))
             sys.exit(1 if report["errors"] else 0)
         manifest = export(args.cards, args.out, args.modern)
     except ExportError as exc:
         sys.exit(f"ERRO: {exc}")
-    summary = {k: manifest[k] for k in (
-        "apkg", "notes", "cards", "notes_by_type", "decks", "media_files", "image_occlusion",
-        "scheduled_cards", "revlog_entries", "evidence_checked_visually", "warnings",
-    )}
-    summary["skipped"] = len(manifest["skipped"])
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-
+    print(f"{manifest['apkg']}: {manifest['notes']} notas, {manifest['cards']} cartões, "
+          f"{manifest['media_files']} mídias, agendados {manifest['scheduled_cards']}, revlog {manifest['revlog_entries']}")
+    print(f"{manifest['csv']['file']}: {manifest['csv']['rows']} linhas; avisos em {len(manifest['warnings'])} cartões; "
+          f"não exportados {len(manifest['skipped'])}")
 
 if __name__ == "__main__":
     main()

@@ -248,6 +248,7 @@ def main() -> None:
     parser.add_argument("--pages", help="intervalo para --render-pages, ex.: 3-10")
     parser.add_argument("--clip", help="recorta região do PDF: PAGINA,x0,y0,x1,y1 (pontos)")
     parser.add_argument("--dpi", type=int, default=150)
+    parser.add_argument("--force", action="store_true", help="reextrai mesmo com a fonte inalterada (ignora o cache)")
     parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -276,7 +277,18 @@ def main() -> None:
         print(f"{len(written)} página(s) renderizada(s) em {rel(project / 'pages')}")
         return
 
-    if ext == "pdf":
+    version = "sha256:" + hashlib.sha256(src.read_bytes()).hexdigest()
+    source_name = rel(src) if src.is_relative_to(root) else str(src)
+    out = project / "source_text.json"
+    previous = json.loads(out.read_text("utf-8")) if out.exists() else None
+    cached = (not args.force and previous and previous.get("source_version") == version
+              and previous.get("source_file") == source_name)
+
+    if cached:  # fonte inalterada: reaproveita a extração (e as transcrições visuais) sem reprocessar
+        units = previous["units"]
+        for u in units:
+            u["chars"] = len(u["text"].strip())
+    elif ext == "pdf":
         units = extract_pdf(src, media, rel)
     elif ext == "pptx":
         units = extract_pptx(src, media, rel)
@@ -297,11 +309,7 @@ def main() -> None:
     else:
         sys.exit(f"ERRO: formato não suportado: .{ext}")
 
-    version = "sha256:" + hashlib.sha256(src.read_bytes()).hexdigest()
-    source_name = rel(src) if src.is_relative_to(root) else str(src)
-    out = project / "source_text.json"
-    if out.exists():  # preserva transcrições visuais já feitas para este mesmo arquivo
-        previous = json.loads(out.read_text("utf-8"))
+    if previous and not cached:  # preserva transcrições visuais já feitas para este mesmo arquivo
         if previous.get("source_version") == version and len(previous["units"]) == len(units):
             for i, old in enumerate(previous["units"]):
                 if old.get("origin") == "visual_transcription":
@@ -309,7 +317,7 @@ def main() -> None:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     low = [u["page"] or u["section"] or i for i, u in enumerate(units, 1) if u["chars"] < LOW_TEXT]
     dump = {
-        "source_file": source_name, "source_version": version, "kind": ext, "extracted_at": now,
+        "source_file": source_name, "source_version": version, "kind": ext, "extracted_at": previous["extracted_at"] if cached else now,
         "units": units, "low_text_units": low,
     }
     out.write_text(json.dumps(dump, ensure_ascii=False, indent=1) + "\n", "utf-8")
@@ -327,8 +335,8 @@ def main() -> None:
     print(json.dumps({
         "source_file": source_name, "source_text": rel(out), "source_version": version, "units": len(units),
         "chars": sum(u["chars"] for u in units), "images": sum(len(u["images"]) for u in units),
-        "low_text_units": low,
-    }, ensure_ascii=False, indent=1))
+        "low_text_units": low, "cached": bool(cached),
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":

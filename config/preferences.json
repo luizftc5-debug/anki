@@ -4,11 +4,11 @@
   "about": "Preferências pedagógicas do usuário. Não armazena fatos médicos. Antes de alterar, acrescente o objeto atual como uma linha em feedback/preferences_history.jsonl. Cada item de learned_rules: {\"rule\": \"...\", \"date\": \"AAAA-MM-DD\", \"from_correction\": \"correção do usuário que originou a regra\"}.",
   "generation_profile": {
     "value": "EQUILIBRADO",
-    "origin": "padrão do CLAUDE.md, seção 05"
+    "origin": "padrão de docs/especificacao.md, seção 05"
   },
   "conciseness": {
-    "value": null,
-    "origin": "ainda não informado pelo usuário"
+    "value": "pergunta com até 40 palavras (trava de erro); uma informação independente por cartão; respostas curtas e inequívocas",
+    "origin": "diretiva ULTRA PERFORMANCE do usuário, 2026-11-14"
   },
   "card_type_preference": {
     "value": null,
@@ -28,12 +28,22 @@
   },
   "formatting": {
     "value": "negrito seletivo no elemento essencial; listas em <ul>/<ol>; complemento no campo Extra; fonte no campo Source",
-    "origin": "padrão do CLAUDE.md, seções 06 e 14"
+    "origin": "padrão de docs/especificacao.md, seções 06 e 14"
   },
   "organization": {
     "value": "baralho Medicina::Disciplina::Tema; tags para classificações transversais",
-    "origin": "padrão do CLAUDE.md, seção 10"
+    "origin": "padrão de docs/especificacao.md, seção 10"
   },
   "recurring_rejection_criteria": [],
-  "learned_rules": []
+  "learned_rules": [
+    {
+      "rule": "Mostrar a prévia integral e esperar aprovação explícita antes de exportar o .apkg final; entregar também CSV Frente;Verso;Tags",
+      "date": "2026-11-14",
+      "from_correction": "usuário pediu visualização integral e aprovação antes da exportação final"
+    }
+  ],
+  "workflow": {
+    "value": "prévia integral (projects/<slug>/preview.md, enviada como arquivo) e aprovação explícita do usuário antes da exportação final; execução silenciosa, saída mínima no chat",
+    "origin": "diretiva ULTRA PERFORMANCE do usuário, 2026-11-14; substitui o 'não exija aprovação' da seção 11"
+  }
 }

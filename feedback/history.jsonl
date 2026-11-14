@@ -1,0 +1,1 @@
+{"date": "2026-11-14", "kind": "workflow", "feedback": "sistema lento e caro em tokens; exigir prévia integral, aprovação explícita antes da exportação, pergunta ≤ 40 palavras, CSV", "action": "CLAUDE.md virou índice; especificação em docs/especificacao.md; cache de extração; prévia e CSV gerados pelo exportador; trava de 40 palavras"}

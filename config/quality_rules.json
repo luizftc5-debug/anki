@@ -26,7 +26,8 @@
       "número visível no cartão ausente dos trechos de evidência (exceção: contagem de itens da lista do verso)",
       "termo da resposta (verso, extra, frase do cloze) ausente das fontes autorizadas",
       "evidência visual sem evidence_image",
-      "estrutura inválida, frente e verso iguais, card_id ou frente repetidos"
+      "estrutura inválida, frente e verso iguais, card_id ou frente repetidos",
+      "frente com mais de 40 palavras"
     ],
     "warnings": [
       "termo da resposta fora da página citada",

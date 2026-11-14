@@ -274,6 +274,8 @@ def test_extrai_pdf_com_paginas_imagens_e_recorte(tmp_path):
     dump["units"][2].update(text="Transcricao visual da terceira pagina do documento.", origin="visual_transcription")
     (tmp_path / out["source_text"]).write_text(json.dumps(dump), "utf-8")
     again = json.loads(extract(tmp_path, str(pdf)))
+    assert again["cached"] is True  # fonte inalterada: não reextrai
+    assert json.loads(extract(tmp_path, str(pdf), "--force"))["cached"] is False
     kept = json.loads((tmp_path / out["source_text"]).read_text("utf-8"))["units"][2]
     assert kept["origin"] == "visual_transcription" and again["low_text_units"] == []
     registry = json.loads((tmp_path / "sources/registry.json").read_text("utf-8"))
@@ -392,3 +394,27 @@ def test_pdf_com_senha_e_recusado(tmp_path):
     cmd = [sys.executable, str(SCRIPTS / "extract_source.py"), str(pdf), "--project", "ext", "--root", str(tmp_path)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     assert result.returncode != 0 and "protegido por senha" in result.stderr
+
+
+def test_frente_acima_de_40_palavras_bloqueia(project):
+    root, deck = project
+    deck["cards"][0]["front"] = "Qual é o valor do parâmetro alfa do ensaio " + "alfa " * 35 + "?"
+    with pytest.raises(ExportError, match="máximo 40"):
+        run(root, deck)
+
+
+def test_csv_e_previa_integral(project):
+    import csv
+
+    root, deck = project
+    manifest = run(root, deck)
+    expected = sum(c["card_type"] in ("basic", "clinical_reasoning") and c["validation_status"] == "approved"
+                   for c in deck["cards"])
+    assert manifest["csv"] == {"file": "exports/ensaio.csv", "rows": expected}
+    with open(root / "exports/ensaio.csv", encoding="utf-8", newline="") as fh:
+        rows = [r for r in csv.reader(fh, delimiter=";") if not r[0].startswith("#")]
+    assert rows[0][1] == "Qual é o valor do parâmetro alfa do ensaio?" and rows[0][3] == "Teste::Sub Definição"
+    report = check(root / "cards/ensaio.json", root=root)
+    preview = (root / report["preview"]).read_text("utf-8")
+    assert preview.count("\n| ") == 1 + report["checked"]  # cabeçalho e um cartão por linha
+    assert "etapa [...] e etapa [...]" in preview and "| inicial \\| final |" in preview
