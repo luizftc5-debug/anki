@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""Extrai texto e imagens de um documento autorizado, preservando a localização.
+"""Extrai texto e imagens de um material, preservando a localização (página, slide ou seção).
 
 Uso:
-  python scripts/extract_source.py <arquivo> --project <slug>
-  python scripts/extract_source.py <arquivo.pdf> --project <slug> --render-pages [--pages 3-10] [--dpi 150]
-  python scripts/extract_source.py <arquivo.pdf> --project <slug> --clip PAGINA,x0,y0,x1,y1 [--dpi 200]
+  python scripts/extract.py <arquivo> --run <slug> [--force]
+  python scripts/extract.py <arquivo.pdf> --run <slug> --render-pages [--pages 3-10] [--dpi 150]
+  python scripts/extract.py <arquivo.pdf> --run <slug> --clip PAGINA,x0,y0,x1,y1 [--dpi 200]
       (x0..y1 em frações da página, de 0 a 1, lidas na página renderizada)
 
-Formatos: PDF, DOCX, PPTX, TXT, Markdown, EPUB (via pandoc), imagens e APKG.
+Formatos: PDF, DOCX, PPTX, TXT, Markdown, HTML, CSV, EPUB (via pandoc), imagens e APKG.
 
 Saídas (o arquivo original nunca é alterado):
-  projects/<slug>/source_text.json   texto por unidade (página, slide ou seção) + sha256 da fonte
-  media/<slug>/                      imagens extraídas na resolução original
-  projects/<slug>/pages/             páginas renderizadas, para leitura visual (--render-pages)
-  sources/registry.json              registro das fontes autorizadas
+  runs/<slug>/source_text.json   texto por unidade de cada fonte do run, com sha256
+  runs/<slug>/media/             imagens extraídas na resolução original
+  runs/<slug>/pages/             páginas renderizadas, para leitura visual (--render-pages)
+  data/manifest.json             cache: sha256 -> runs que já extraíram o arquivo
 
-Não há OCR neste ambiente. Páginas com pouco texto extraível entram em `low_text_units` e
-são lidas visualmente nas páginas renderizadas. A transcrição vai para o `text` da unidade, com
-`"origin": "visual_transcription"`; ela é preservada quando o mesmo arquivo é extraído de novo.
-Imagens idênticas em várias páginas (logotipos, fundos) são salvas uma vez e marcadas com
-`repeated_on_pages`.
+Cache: se o mesmo arquivo (mesmo sha256) já foi extraído neste run, nada é refeito (--force refaz).
+Não há OCR. Unidades com pouco texto entram em `low_text_units` e são lidas visualmente nas páginas
+renderizadas; a transcrição vai para o `text` da unidade com `"origin": "visual_transcription"` e é
+preservada em reextrações do mesmo arquivo.
 """
 from __future__ import annotations
 
@@ -240,13 +239,24 @@ def extract_apkg(path: Path, media: Path, rel) -> list[dict]:
     return units
 
 
+def html_to_text(raw: str) -> str:
+    from html import unescape
+
+    raw = re.sub(r"(?is)<(script|style)\b.*?</\1>", "", raw)
+    raw = re.sub(r"(?is)<h([1-6])[^>]*>(.*?)</h\1>", lambda m: "\n" + "#" * int(m[1]) + " " + m[2] + "\n", raw)
+    raw = re.sub(r"(?i)<br\s*/?>|</(p|div|li|tr|table|ul|ol)>", "\n", raw)
+    raw = re.sub(r"(?i)</t[dh]>", " | ", raw)
+    return unescape(re.sub(r"<[^>]+>", "", raw))
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extrai texto e imagens de uma fonte autorizada")
+    parser = argparse.ArgumentParser(description="Extrai texto e imagens de um material")
     parser.add_argument("source", type=Path)
-    parser.add_argument("--project", required=True, help="slug do projeto, ex.: bradiarritmias")
+    parser.add_argument("--run", required=True, help="slug do run, ex.: bradiarritmias")
+    parser.add_argument("--force", action="store_true", help="ignora o cache e extrai de novo")
     parser.add_argument("--render-pages", action="store_true", help="renderiza páginas do PDF em PNG")
     parser.add_argument("--pages", help="intervalo para --render-pages, ex.: 3-10")
-    parser.add_argument("--clip", help="recorta região do PDF: PAGINA,x0,y0,x1,y1 (pontos)")
+    parser.add_argument("--clip", help="recorta região do PDF: PAGINA,x0,y0,x1,y1 (frações)")
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -254,12 +264,11 @@ def main() -> None:
     src: Path = args.source.resolve()
     if not src.is_file():
         sys.exit(f"ERRO: arquivo não encontrado: {src}")
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", args.project):
-        sys.exit("ERRO: --project deve usar apenas letras minúsculas, números, '-' e '_'")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", args.run):
+        sys.exit("ERRO: --run deve usar apenas letras minúsculas, números, '-' e '_'")
     root: Path = args.root.resolve()
-    project = root / "projects" / args.project
-    media = root / "media" / args.project
-    project.mkdir(parents=True, exist_ok=True)
+    run = root / "runs" / args.run
+    media = run / "media"
     media.mkdir(parents=True, exist_ok=True)
     rel = lambda p: str(Path(p).relative_to(root))  # noqa: E731
     ext = src.suffix.lower().lstrip(".")
@@ -272,8 +281,18 @@ def main() -> None:
         if args.pages:
             first, _, last = args.pages.partition("-")
             pages = list(range(int(first), int(last or first) + 1))
-        written = render_pdf(src, project / "pages", pages, args.dpi)
-        print(f"{len(written)} página(s) renderizada(s) em {rel(project / 'pages')}")
+        written = render_pdf(src, run / "pages", pages, args.dpi)
+        print(f"{len(written)} página(s) renderizada(s) em {rel(run / 'pages')}")
+        return
+
+    version = "sha256:" + hashlib.sha256(src.read_bytes()).hexdigest()
+    source_name = rel(src) if src.is_relative_to(root) else src.name
+    out = run / "source_text.json"
+    store = json.loads(out.read_text("utf-8")) if out.exists() else {"run": args.run, "sources": []}
+    previous = next((s for s in store["sources"] if s["file"] == source_name), None)
+    if previous and previous["sha256"] == version and not args.force:
+        print(json.dumps({"cache": True, "file": source_name, "units": len(previous["units"]),
+                          "low_text_units": previous["low_text_units"]}, ensure_ascii=False))
         return
 
     if ext == "pdf":
@@ -282,8 +301,10 @@ def main() -> None:
         units = extract_pptx(src, media, rel)
     elif ext == "docx":
         units = extract_docx(src, media, rel)
-    elif ext in ("txt", "md", "markdown"):
+    elif ext in ("txt", "md", "markdown", "csv"):
         units = split_by_headings(src.read_text("utf-8", errors="replace"))
+    elif ext in ("html", "htm"):
+        units = split_by_headings(html_to_text(src.read_text("utf-8", errors="replace")))
     elif ext == "epub":
         units = extract_epub(src, media, rel)
     elif ext == "apkg":
@@ -297,35 +318,28 @@ def main() -> None:
     else:
         sys.exit(f"ERRO: formato não suportado: .{ext}")
 
-    version = "sha256:" + hashlib.sha256(src.read_bytes()).hexdigest()
-    source_name = rel(src) if src.is_relative_to(root) else str(src)
-    out = project / "source_text.json"
-    if out.exists():  # preserva transcrições visuais já feitas para este mesmo arquivo
-        previous = json.loads(out.read_text("utf-8"))
-        if previous.get("source_version") == version and len(previous["units"]) == len(units):
-            for i, old in enumerate(previous["units"]):
-                if old.get("origin") == "visual_transcription":
-                    units[i] = {**old, "chars": len(old["text"].strip())}
+    if previous and previous["sha256"] == version and len(previous["units"]) == len(units):
+        for i, old in enumerate(previous["units"]):  # preserva transcrições visuais
+            if old.get("origin") == "visual_transcription":
+                units[i] = {**old, "chars": len(old["text"].strip())}
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     low = [u["page"] or u["section"] or i for i, u in enumerate(units, 1) if u["chars"] < LOW_TEXT]
-    dump = {
-        "source_file": source_name, "source_version": version, "kind": ext, "extracted_at": now,
-        "units": units, "low_text_units": low,
-    }
-    out.write_text(json.dumps(dump, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    entry = {"file": source_name, "sha256": version, "kind": ext, "extracted_at": now,
+             "units": units, "low_text_units": low}
+    store["sources"] = [s for s in store["sources"] if s["file"] != source_name] + [entry]
+    out.write_text(json.dumps(store, ensure_ascii=False, indent=1) + "\n", "utf-8")
 
-    registry_path = root / "sources" / "registry.json"
-    registry_path.parent.mkdir(exist_ok=True)
-    registry = json.loads(registry_path.read_text("utf-8")) if registry_path.exists() else []
-    registry = [r for r in registry if not (r["project"] == args.project and r["source_file"] == source_name)]
-    registry.append({
-        "project": args.project, "source_file": source_name, "source_version": version, "kind": ext,
-        "bytes": src.stat().st_size, "units": len(units), "registered_at": now,
-    })
-    registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=1) + "\n", "utf-8")
+    manifest_path = root / "data" / "manifest.json"
+    manifest_path.parent.mkdir(exist_ok=True)
+    manifest = json.loads(manifest_path.read_text("utf-8")) if manifest_path.exists() else {}
+    item = manifest.setdefault(version, {"file": source_name, "bytes": src.stat().st_size, "runs": []})
+    if args.run not in item["runs"]:
+        item["runs"].append(args.run)
+    item["extracted_at"] = now
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", "utf-8")
 
     print(json.dumps({
-        "source_file": source_name, "source_text": rel(out), "source_version": version, "units": len(units),
+        "file": source_name, "source_text": rel(out), "sha256": version, "units": len(units),
         "chars": sum(u["chars"] for u in units), "images": sum(len(u["images"]) for u in units),
         "low_text_units": low,
     }, ensure_ascii=False, indent=1))

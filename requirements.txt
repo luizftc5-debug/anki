@@ -1,4 +1,5 @@
-# Biblioteca oficial do Anki (mesmo backend do Anki Desktop). Verificado com esta versão.
+genanki==0.13.1
+# Backend oficial do Anki: usado só para testar a importação do .apkg numa coleção descartável.
 anki==26.9.4
 pymupdf==2.1
 pillow

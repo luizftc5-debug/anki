@@ -1,0 +1,33 @@
+{
+ "schema_version": 1,
+ "about": "Parâmetros do MEDICAL ELITE — ANKI ENGINE. Não contém fatos médicos. Mudanças de preferência via `engine.py feedback --scope geral` (a versão anterior vai para data/settings_history.jsonl).",
+ "limits": {
+  "front_max_words": 40,
+  "front_ideal_max_words": 25,
+  "back_ideal_max_words": 8,
+  "back_hard_max_words": 20,
+  "near_duplicate_ratio": 0.85
+ },
+ "tag_regex": "^[A-Z][A-Za-z0-9]*::[A-Z][A-Za-z0-9]*::[A-Z][A-Za-z0-9]*$",
+ "forbidden_patterns": [
+  {"regex": "cart[aã]o anterior|pergunta anterior|\\be o segundo\\?|\\be o pr[oó]ximo\\?", "why": "dependência de outro cartão (Regra 05)"},
+  {"regex": "\\bexplique\\b|\\bdiscorra\\b|\\bdescreva\\b|\\bcite todos\\b|\\bquais s[aã]o todos\\b", "why": "comando discursivo ou lista exaustiva (Regras 01 e 10)"},
+  {"regex": "\\{\\{c\\d+::", "why": "sintaxe Cloze em projeto estritamente BASIC"}
+ ],
+ "deck_root": "Medicina",
+ "external_verification": {
+  "policy": "somente_com_autorizacao",
+  "about": "Material do usuário é a fonte primária. Consulta externa (diretriz, livro-texto, PubMed) só quando o usuário autorizar para o run, registrada em external_refs com obra, edição/ano e página. Nunca complementar silenciosamente."
+ },
+ "preview_page_size": 25,
+ "anki": {
+  "model_id": 1763136100001,
+  "model_name": "EasyCards Basic",
+  "css": ".card { font-family: system-ui, -apple-system, \"Segoe UI\", Roboto, Arial, sans-serif; font-size: 21px; line-height: 1.45; text-align: center; color: #1f1f1f; background: #fafaf8; max-width: 38em; margin: 0 auto; padding: 0.8em; }\n.nightMode.card, .night_mode .card { color: #e6e6e6; background: #1e1e1e; }\nhr#answer { border: 0; border-top: 1px solid #c8c8c8; margin: 1em 0; }\nimg { max-width: 100%; height: auto; }\nb, strong { font-weight: 650; }"
+ },
+ "preferences": {
+  "style": null,
+  "notes": "Preferências editoriais ainda não informadas pelo usuário."
+ },
+ "learned_rules": []
+}
