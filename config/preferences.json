@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-14",
+  "updated_at": "2026-11-15",
   "about": "Preferências pedagógicas do usuário. Não armazena fatos médicos. Antes de alterar, acrescente o objeto atual como uma linha em feedback/preferences_history.jsonl. Cada item de learned_rules: {\"rule\": \"...\", \"date\": \"AAAA-MM-DD\", \"from_correction\": \"correção do usuário que originou a regra\"}.",
   "generation_profile": {
     "value": "EQUILIBRADO",
@@ -23,8 +23,8 @@
     "origin": "pedido do usuário em 2026-11-14"
   },
   "style_reference": {
-    "value": null,
-    "origin": "ainda não informado pelo usuário"
+    "value": "prática clínica: infecção → agentes e antibiótico; aplicabilidade em prova",
+    "origin": "pedido do usuário em 2026-11-15"
   },
   "formatting": {
     "value": "negrito seletivo no elemento essencial; listas em <ul>/<ol>; complemento no campo Extra; fonte no campo Source",
@@ -52,6 +52,16 @@
       "rule": "Priorizar velocidade: ler só o escopo pedido, extrair texto uma vez, redigir todos os cartões num único lote e exportar; sem inspeções visuais desnecessárias",
       "date": "2026-11-14",
       "from_correction": "usuário reclamou da demora na geração"
+    },
+    {
+      "rule": "Incluir cartões práticos 'infecção X: quais agentes cobrir e qual antibiótico', sempre com base no que a fonte traz",
+      "date": "2026-11-15",
+      "from_correction": "pedido do usuário na 2ª rodada"
+    },
+    {
+      "rule": "Em cada nova rodada: listar as frentes existentes antes de redigir, ler só o material novo e não repetir cartões; rodadas menores e mais seletivas",
+      "date": "2026-11-15",
+      "from_correction": "pedido do usuário: não repetir, otimizar tempo, não gerar em excesso"
     }
   ]
 }
